@@ -1,0 +1,84 @@
+{
+  "name": "nest-caller",
+  "displayName": "Nest Caller",
+  "description": "Chame rotas Nest diretamente do VS Code (CodeLens + WebView com presets, bearer, global prefix e export .http).",
+  "publisher": "seu-publisher-id",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "icon": "media/icon.png",
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "nest",
+    "nestjs",
+    "api",
+    "rest",
+    "http",
+    "curl"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SEUUSER/nest-caller"
+  },
+  "homepage": "https://github.com/SEUUSER/nest-caller",
+  "bugs": {
+    "url": "https://github.com/SEUUSER/nest-caller/issues"
+  },
+  "galleryBanner": {
+    "color": "#1f2430",
+    "theme": "dark"
+  },
+  "qna": "marketplace",
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "nestCaller.openRouteForm",
+        "title": "Nest Caller: Open Route Form"
+      }
+    ],
+    "configuration": {
+      "title": "Nest Caller",
+      "properties": {
+        "nestCaller.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "Base URL da sua API Nest."
+        },
+        "nestCaller.defaultHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "Content-Type: application/json"
+          ],
+          "description": "Headers padrão (um por linha, \"Chave: Valor\")."
+        },
+        "nestCaller.globalPrefix": {
+          "type": "string",
+          "default": "",
+          "description": "Global prefix manual (ex.: /v1). Se vazio, será detectado do main.ts quando possível."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "package": "vsce package -o nest-caller.vsix",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.84.0",
+    "vsce": "^2.15.0",
+    "typescript": "^5.4.0"
+  }
+}

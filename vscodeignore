@@ -1,0 +1,11 @@
+# Excluir configs locais e fontes TypeScript
+.vscode/**
+.github/**
+.git/**
+node_modules/**/.bin/**
+out/test/**
+src/**
+**/*.map
+**/*.ts
+tsconfig.json
+.vscode/**
