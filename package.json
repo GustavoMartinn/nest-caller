@@ -2,8 +2,8 @@
   "name": "nest-caller",
   "displayName": "Nest Caller",
   "description": "Chame rotas Nest diretamente do VS Code (CodeLens + WebView com presets, bearer, global prefix e export .http).",
-  "publisher": "seu-publisher-id",
-  "version": "1.0.0",
+  "publisher": "Gustavin",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -21,11 +21,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/SEUUSER/nest-caller"
+    "url": "https://github.com/GustavoMartinn/nest-caller"
   },
-  "homepage": "https://github.com/SEUUSER/nest-caller",
+  "homepage": "https://github.com/GustavoMartinn/nest-caller",
   "bugs": {
-    "url": "https://github.com/SEUUSER/nest-caller/issues"
+    "url": "https://github.com/GustavoMartinn/nest-caller/issues"
   },
   "galleryBanner": {
     "color": "#1f2430",
@@ -35,6 +35,7 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:typescript",
+    "onLanguage:typescriptreact",
     "onStartupFinished"
   ],
   "contributes": {
@@ -76,9 +77,11 @@
     "package": "vsce package -o nest-caller.vsix",
     "publish": "vsce publish"
   },
+  "dependencies": {
+    "typescript": "^5.4.0"
+  },
   "devDependencies": {
     "@types/vscode": "^1.84.0",
-    "vsce": "^2.15.0",
-    "typescript": "^5.4.0"
+    "vsce": "^2.15.0"
   }
 }
