@@ -1,16 +1,5 @@
 # Changelog
 
-Todas as mudanças notáveis neste projeto serão documentadas aqui.
-
-## [1.1.1] - 2025-08-19
-### Fixed
-- **🔄 Substituição de Parâmetros**: Corrigida substituição de path parameters no comando cURL gerado
-
-### Technical
-- Movida função `replacePathParams` para escopo global do JavaScript da webview
-- Corrigidas referências de template strings para variáveis JavaScript adequadas
-- Melhorado gerenciamento de escopo de funções na webview
-
 ## [1.1.0] - 2025-08-19
 ### Added
 - **🎯 Body Pré-pronto baseado em DTOs**: Geração automática de JSON de exemplo quando métodos possuem `@Body` com tipos específicos
@@ -26,12 +15,24 @@ Todas as mudanças notáveis neste projeto serão documentadas aqui.
 - **Busca Melhorada**: Resolução automática de imports relativos (ex: `./dto/user.dto.ts`)
 - **Regex Avançada**: Detecção mais precisa de tipos exportados (`export class`, `export interface`)
 - **Inferência por Nome**: Valores exemplo inteligentes baseados no nome da propriedade (`email` → "user@example.com")
+- **🎨 Layout de Presets**: Melhorada responsividade e proporções da área de presets
+- **📱 Interface Responsiva**: Corrigido problema de botões sendo cortados ou saindo da área visível
+- **🔧 Usabilidade**: Select de preset agora possui tamanho adequado para melhor experiência do usuário
+
+### Fixed
+- **🔄 Substituição de Parâmetros**: Corrigida substituição de path parameters no comando cURL gerado
 
 ### Technical
 - Função `generateBodyExample()` com busca em múltiplas etapas
 - Análise AST melhorada para interfaces e classes TypeScript
 - Suporte para tipos complexos (union types, objetos aninhados, arrays tipados)
 - Sistema de cache para otimizar busca de tipos no workspace
+- Movida função `replacePathParams` para escopo global do JavaScript da webview
+- Corrigidas referências de template strings para variáveis JavaScript adequadas
+- Melhorado gerenciamento de escopo de funções na webview
+- Ajustadas proporções do grid layout nos presets (labels: 80px, inputs: 2fr)
+- Adicionadas larguras mínimas para botões e campos de entrada
+- Melhorado layout flexbox para evitar overflow em diferentes tamanhos de tela
 
 ## [1.0.0] - 2025-08-18
 ### Added

@@ -991,7 +991,7 @@ function getWebviewHtmlWithGlobal(
 
   /* linhas do formulário (coluna 2 pode encolher sem vazar) */
   .row {
-    display:grid; grid-template-columns: 130px minmax(0,1fr);
+    display:grid; grid-template-columns: 50px minmax(0,1fr);
     gap:10px; align-items:center; margin-bottom:10px;
   }
   .row--inline { display:flex; gap:10px; align-items:center; }
@@ -1081,18 +1081,24 @@ function getWebviewHtmlWithGlobal(
     </div>
 
     <!-- Presets -->
-    <div class="card" style="margin-bottom: var(--gap);">
-      <div class="row" style="grid-template-columns:130px 1fr 1fr auto;">
-        <label>Preset</label>
-        <select id="presetSelect"></select>
-        <input id="presetName" placeholder="Nome do preset" />
-        <div class="row--inline" style="justify-content:flex-end;">
-          <button id="loadPreset" class="btn small">Carregar</button>
-          <button id="savePreset" class="btn small">Salvar</button>
-          <button id="deletePreset" class="btn small">Excluir</button>
+      <div class="card" style="margin-bottom: var(--gap);">
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- Linha 1: Carregar preset existente -->
+          <div class="row" style="grid-template-columns: 50px 1fr auto auto; gap: 10px; align-items: center;">
+            <label>Preset</label>
+            <select id="presetSelect" style="min-width: 0;"></select>
+            <button id="loadPreset" class="btn small" style="white-space: nowrap;">Carregar</button>
+            <button id="deletePreset" class="btn small" style="white-space: nowrap;">Excluir</button>
+          </div>
+          
+          <!-- Linha 2: Salvar novo preset -->
+          <div class="row" style="grid-template-columns: 50px 1fr auto; gap: 10px; align-items: center;">
+            <label>Salvar como</label>
+            <input id="presetName" placeholder="Nome do preset" style="min-width: 0;" />
+            <button id="savePreset" class="btn small" style="white-space: nowrap;">Salvar</button>
+          </div>
         </div>
       </div>
-    </div>
 
     <!-- Global Prefix -->
     <div class="card" style="margin-bottom: var(--gap);">
