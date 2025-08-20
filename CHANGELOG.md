@@ -2,6 +2,15 @@
 
 Todas as mudanças notáveis neste projeto serão documentadas aqui.
 
+## [1.1.1] - 2025-08-19
+### Fixed
+- **🔄 Substituição de Parâmetros**: Corrigida substituição de path parameters no comando cURL gerado
+
+### Technical
+- Movida função `replacePathParams` para escopo global do JavaScript da webview
+- Corrigidas referências de template strings para variáveis JavaScript adequadas
+- Melhorado gerenciamento de escopo de funções na webview
+
 ## [1.1.0] - 2025-08-19
 ### Added
 - **🎯 Body Pré-pronto baseado em DTOs**: Geração automática de JSON de exemplo quando métodos possuem `@Body` com tipos específicos

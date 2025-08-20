@@ -1178,6 +1178,7 @@ function getWebviewHtmlWithGlobal(
   const presetNames = ${namesJSON};
   const knownQP = ${knownQPJSON};
   const pathParams = ${pathParamsJSON};
+  const routeMethod = '${route.method}';
 
   const el = (id) => document.getElementById(id);
   const toast = (msg) => {
@@ -1186,6 +1187,16 @@ function getWebviewHtmlWithGlobal(
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 1600);
   };
+
+  // Função global para substituir path params
+  function replacePathParams(path, pathParams) {
+    let result = path;
+    Object.entries(pathParams || {}).forEach(([key, value]) => {
+      // Substitui :param pelo valor
+      result = result.replace(new RegExp(':' + key + '\\\\b', 'g'), value || ':' + key);
+    });
+    return result;
+  }
 
   // Prévia do caminho/base
   let updatePreview; // Variável para expor a função update
@@ -1198,14 +1209,6 @@ function getWebviewHtmlWithGlobal(
       const left = a.endsWith('/') ? a.slice(0,-1) : a;
       const right = b.startsWith('/') ? b : '/' + b;
       return left + right;
-    }
-    function replacePathParams(path, pathParams) {
-      let result = path;
-      Object.entries(pathParams || {}).forEach(([key, value]) => {
-        // Substitui :param pelo valor
-        result = result.replace(new RegExp(':' + key + '\\\\b', 'g'), value || ':' + key);
-      });
-      return result;
     }
     function update(){
       const base = el('baseUrl')?.value || '';
@@ -1383,9 +1386,12 @@ function getWebviewHtmlWithGlobal(
     if (payload.includeBearer && payload.bearerToken && !headers.some(h => /^Authorization\\s*:/i.test(h))) {
       headers.push('Authorization: Bearer ' + payload.bearerToken);
     }
-    let curl = 'curl -i -X ${route.method} "' + url + '"';
+    const hasBody = payload.bodyText && payload.bodyText.trim().length > 0 && routeMethod !== 'GET' && routeMethod !== 'HEAD';
+    if (hasBody && !headers.some(h => /^Content-Type\\s*:/i.test(h))) {
+      headers.push('Content-Type: application/json');
+    }
+    let curl = 'curl -i -X ' + routeMethod + ' "' + url + '"';
     headers.forEach(h => curl += ' -H "' + h.replace(/"/g, '\\"') + '"');
-    const hasBody = payload.bodyText && payload.bodyText.trim().length > 0 && '${route.method}' !== 'GET' && '${route.method}' !== 'HEAD';
     if (hasBody) curl += " -d '" + payload.bodyText.replace(/'/g, "'\\\\''") + "'";
     return curl;
   }
