@@ -72,6 +72,11 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('nestCaller.openRouteForm',
       async (route: RouteInfo) => openFormWebview(route, context))
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('nestCaller.openSettings',
+      async () => openSettingsWebview(context))
+  );
 }
 
 export function deactivate() { }
@@ -848,6 +853,41 @@ ${bodyText}
   });
 }
 
+/** -------------------- Settings Webview -------------------- */
+async function openSettingsWebview(context: vscode.ExtensionContext) {
+  const panel = vscode.window.createWebviewPanel(
+    'nestCallerSettings',
+    'Nest Caller - Configurações',
+    vscode.ViewColumn.One,
+    { enableScripts: true }
+  );
+
+  const currentConfig = vscode.workspace.getConfiguration('nestCaller');
+  const baseUrl = currentConfig.get<string>('baseUrl') || 'http://localhost:3000';
+  const defaultHeaders = currentConfig.get<string[]>('defaultHeaders') || ['Content-Type: application/json'];
+  const globalPrefix = currentConfig.get<string>('globalPrefix') || '';
+
+  panel.webview.html = getSettingsHtml({ baseUrl, defaultHeaders, globalPrefix });
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg.type === 'saveSettings') {
+      const { baseUrl, defaultHeaders, globalPrefix } = msg.payload;
+      const config = vscode.workspace.getConfiguration('nestCaller');
+
+      try {
+        await config.update('baseUrl', baseUrl, vscode.ConfigurationTarget.Workspace);
+        await config.update('defaultHeaders', defaultHeaders, vscode.ConfigurationTarget.Workspace);
+        await config.update('globalPrefix', globalPrefix, vscode.ConfigurationTarget.Workspace);
+
+        vscode.window.showInformationMessage('Configurações salvas com sucesso!');
+        panel.dispose();
+      } catch (error) {
+        vscode.window.showErrorMessage('Erro ao salvar configurações: ' + error);
+      }
+    }
+  });
+}
+
 /** -------------------- Helpers Node/VS Code -------------------- */
 function getRouteKey(route: RouteInfo) { return `${route.method} ${route.path}`; }
 
@@ -1505,6 +1545,155 @@ function getWebviewHtmlWithGlobal(
     const keys = Object.keys(qp);
     knownQP.forEach(k => addQueryChip(k, qp[k] || ''));
     Object.keys(qp).forEach(k => { if (!knownQP.includes(k)) addQueryChip(k, qp[k]); });
+  }
+</script>
+</body>
+</html>`;
+}
+
+/** -------------------- Settings HTML -------------------- */
+function getSettingsHtml(config: { baseUrl: string; defaultHeaders: string[]; globalPrefix: string }) {
+  const headersText = config.defaultHeaders.join('\\n');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<style>
+  :root{
+    --bg: var(--vscode-editor-background);
+    --panel: var(--vscode-sideBar-background);
+    --text: var(--vscode-foreground);
+    --muted: var(--vscode-descriptionForeground);
+    --border: var(--vscode-widget-border);
+    --input-bg: var(--vscode-input-background);
+    --input-fg: var(--vscode-input-foreground);
+    --input-border: var(--vscode-input-border);
+    --btn-bg: var(--vscode-button-background);
+    --btn-fg: var(--vscode-button-foreground);
+    --btn-hover: var(--vscode-button-hoverBackground);
+    --focus: var(--vscode-focusBorder);
+    --radius: 8px;
+    --gap: 14px;
+  }
+  
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    padding:0; margin:0;
+    background:var(--bg); color:var(--text);
+    font:13px/1.45 -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+  
+  .container { padding: 20px; max-width: 600px; margin: 0 auto; }
+  .header { margin-bottom: 24px; }
+  .title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { color: var(--muted); }
+  
+  .form-group { margin-bottom: 20px; }
+  label { 
+    display: block; 
+    margin-bottom: 6px; 
+    font-weight: 500; 
+    color: var(--text);
+  }
+  .description {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  
+  input, textarea {
+    width: 100%;
+    background: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    outline: none;
+    transition: border .15s ease, box-shadow .15s ease;
+  }
+  
+  input:focus, textarea:focus {
+    border-color: var(--focus);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent);
+  }
+  
+  textarea {
+    min-height: 120px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  
+  .btn {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    border: none;
+    border-radius: var(--radius);
+    padding: 10px 20px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background .15s ease;
+  }
+  
+  .btn:hover {
+    background: var(--btn-hover);
+  }
+  
+  .btn:active {
+    transform: translateY(1px);
+  }
+  
+  .actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 30px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="title">Configurações do Nest Caller</div>
+    <div class="subtitle">Configure as configurações padrão da extensão</div>
+  </div>
+  
+  <div class="form-group">
+    <label for="baseUrl">Base URL</label>
+    <div class="description">Base URL da sua API Nest.</div>
+    <input type="text" id="baseUrl" value="${config.baseUrl}" placeholder="http://localhost:3000" />
+  </div>
+  
+  <div class="form-group">
+    <label for="defaultHeaders">Default Headers</label>
+    <div class="description">Headers padrão (um por linha, "Chave: Valor").</div>
+    <textarea id="defaultHeaders" placeholder="Content-Type: application/json">${headersText}</textarea>
+  </div>
+  
+  <div class="form-group">
+    <label for="globalPrefix">Global Prefix</label>
+    <div class="description">Global prefix manual (ex.: /v1). Se vazio, será detectado do main.ts quando possível.</div>
+    <input type="text" id="globalPrefix" value="${config.globalPrefix}" placeholder="/v1" />
+  </div>
+  
+  <div class="actions">
+    <button class="btn" onclick="saveSettings()">Salvar Configurações</button>
+  </div>
+</div>
+
+<script>
+  const vscode = acquireVsCodeApi();
+  
+  function saveSettings() {
+    const baseUrl = document.getElementById('baseUrl').value.trim() || 'http://localhost:3000';
+    const headersText = document.getElementById('defaultHeaders').value.trim();
+    const defaultHeaders = headersText ? headersText.split('\\n').map(h => h.trim()).filter(Boolean) : ['Content-Type: application/json'];
+    const globalPrefix = document.getElementById('globalPrefix').value.trim();
+    
+    vscode.postMessage({
+      type: 'saveSettings',
+      payload: { baseUrl, defaultHeaders, globalPrefix }
+    });
   }
 </script>
 </body>

@@ -43,6 +43,10 @@
       {
         "command": "nestCaller.openRouteForm",
         "title": "Nest Caller: Open Route Form"
+      },
+      {
+        "command": "nestCaller.openSettings",
+        "title": "Nest Caller: Open Settings"
       }
     ],
     "configuration": {
