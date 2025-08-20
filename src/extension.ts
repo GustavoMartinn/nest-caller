@@ -850,6 +850,29 @@ ${bodyText}
         }
       }
     }
+
+    if (msg.type === 'resetToGlobalSettings') {
+      // Busca as configurações globais atuais
+      const currentConfig = vscode.workspace.getConfiguration('nestCaller');
+      const currentBaseUrl = currentConfig.get<string>('baseUrl') || 'http://localhost:3000';
+      const currentDefaultHeaders = currentConfig.get<string[]>('defaultHeaders') || ['Content-Type: application/json'];
+      const currentGlobalPrefix = currentConfig.get<string>('globalPrefix') || '';
+
+      // Detecta o global prefix atual
+      const detected = await detectGlobalPrefix();
+      const finalGlobalPrefix = currentGlobalPrefix || detected?.prefix || '';
+
+      // Envia os valores atuais para a webview
+      panel.webview.postMessage({
+        type: 'applyGlobalReset',
+        payload: {
+          baseUrl: currentBaseUrl,
+          headers: currentDefaultHeaders,
+          globalPrefix: finalGlobalPrefix,
+          bodyText: route.params.bodyExample || ''
+        }
+      });
+    }
   });
 }
 
@@ -1210,6 +1233,7 @@ function getWebviewHtmlWithGlobal(
     </div>
 
     <div class="actions">
+      <button id="resetRoute" class="btn">Resetar Rota</button>
       <button id="exportHttp" class="btn">Exportar .http</button>
       <button id="sendBtn" class="btn primary">Send</button>
     </div>
@@ -1518,6 +1542,46 @@ function getWebviewHtmlWithGlobal(
     if (msg.type === 'showToast') {
       toast(msg.payload.message);
     }
+    if (msg.type === 'applyGlobalReset') {
+      // Aplica as configurações globais atuais
+      const globalSettings = msg.payload;
+      
+      // Reset dos campos principais
+      el('baseUrl').value = globalSettings.baseUrl;
+      el('path').value = initial.path; // Path da rota original
+      el('headers').value = globalSettings.headers.join('\\n');
+      el('bearer').value = '';
+      el('bearerOn').checked = false;
+      el('applyGlobal').checked = true; // Ativa global prefix por padrão
+      el('globalPrefix').value = globalSettings.globalPrefix;
+      
+      // Reset body text se existir
+      const bodyTextEl = el('bodyText');
+      if (bodyTextEl) {
+        bodyTextEl.value = globalSettings.bodyText;
+      }
+      
+      // Reset path params
+      document.querySelectorAll('[data-pp]').forEach(i => {
+        i.value = '';
+      });
+      
+      // Reset query params - remove todos os chips e adiciona apenas os conhecidos vazios
+      const qArea = el('queryArea');
+      qArea.innerHTML = '';
+      knownQP.forEach(k => addQueryChip(k, ''));
+      
+      // Reset preset selection
+      el('presetSelect').value = '';
+      el('presetName').value = '';
+      
+      // Atualiza preview
+      if (typeof updatePreview === 'function') {
+        updatePreview();
+      }
+      
+      toast('Rota resetada com configurações globais atuais');
+    }
   });
 
   function applyPreset(p){
@@ -1545,6 +1609,15 @@ function getWebviewHtmlWithGlobal(
     const keys = Object.keys(qp);
     knownQP.forEach(k => addQueryChip(k, qp[k] || ''));
     Object.keys(qp).forEach(k => { if (!knownQP.includes(k)) addQueryChip(k, qp[k]); });
+  }
+
+  // Reset Route Button
+  const resetBtn = el('resetRoute');
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      // Solicita as configurações globais atuais do VS Code
+      vscode.postMessage({ type: 'resetToGlobalSettings' });
+    };
   }
 </script>
 </body>

@@ -10,6 +10,8 @@
 - **📝 Indicação Visual**: Mostra qual DTO foi usado como base (ex: "baseado em CreateUserDto")
 - **🎲 Fallbacks Inteligentes**: Exemplos genéricos baseados em padrões de nomenclatura quando DTO não é encontrado
 - **🔍 Logs Detalhados**: Console logs para debug do processo de geração de exemplos
+- **⚙️ Interface de Configurações**: Nova tela de configurações acessível via Command Palette
+- **🔧 Botão Resetar Rota**: Reset instantâneo para aplicar configurações globais atuais à rota
 
 ### Enhanced
 - **Busca Melhorada**: Resolução automática de imports relativos (ex: `./dto/user.dto.ts`)
@@ -21,6 +23,7 @@
 
 ### Fixed
 - **🔄 Substituição de Parâmetros**: Corrigida substituição de path parameters no comando cURL gerado
+- **📋 Configurações Funcionais**: Base URL, Default Headers e Global Prefix agora funcionam corretamente
 
 ### Technical
 - Função `generateBodyExample()` com busca em múltiplas etapas
@@ -30,6 +33,9 @@
 - Movida função `replacePathParams` para escopo global do JavaScript da webview
 - Corrigidas referências de template strings para variáveis JavaScript adequadas
 - Melhorado gerenciamento de escopo de funções na webview
+- Comando `nestCaller.openSettings` para acesso às configurações globais
+- Sistema de mensagens para reset em tempo real das configurações
+- Interface de configurações com salvamento no workspace do VS Code
 - Ajustadas proporções do grid layout nos presets (labels: 80px, inputs: 2fr)
 - Adicionadas larguras mínimas para botões e campos de entrada
 - Melhorado layout flexbox para evitar overflow em diferentes tamanhos de tela
