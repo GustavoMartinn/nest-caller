@@ -14,6 +14,8 @@ type RouteInfo = {
     pathParams: string[];
     queryParams: string[];      // nomes de @Query('x'); '*' se livre
     hasBody: boolean;
+    bodyType?: string;          // tipo do @Body (ex: CreateUserDto)
+    bodyExample?: string;       // JSON de exemplo baseado no tipo
   };
 };
 
@@ -41,10 +43,10 @@ const HTTP_DECOS = new Set(['Get', 'Post', 'Put', 'Patch', 'Delete', 'Options', 
 /** -------------------- Ativação -------------------- */
 export function activate(context: vscode.ExtensionContext) {
   const provider: vscode.CodeLensProvider = {
-    provideCodeLenses(document) {
+    async provideCodeLenses(document) {
       if (!document.fileName.endsWith('.ts')) return [];
       try {
-        const routes = extractRoutes(document);
+        const routes = await extractRoutes(document);
         return routes.map(r => {
           const range = new vscode.Range(r.line, 0, r.line, 0);
           return new vscode.CodeLens(range, {
@@ -75,7 +77,7 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() { }
 
 /** -------------------- Extração de rotas -------------------- */
-function extractRoutes(document: vscode.TextDocument): RouteInfo[] {
+async function extractRoutes(document: vscode.TextDocument): Promise<RouteInfo[]> {
   const source = ts.createSourceFile(
     document.fileName,
     document.getText(),
@@ -84,7 +86,13 @@ function extractRoutes(document: vscode.TextDocument): RouteInfo[] {
     ts.ScriptKind.TS
   );
 
-  const routes: RouteInfo[] = [];
+  const routesData: Omit<RouteInfo, 'params'>[] = [];
+  const paramsData: Array<{
+    pathParams: string[];
+    queryParams: string[];
+    hasBody: boolean;
+    bodyType?: string;
+  }> = [];
 
   const visit = (node: ts.Node) => {
     if (
@@ -119,7 +127,7 @@ function extractRoutes(document: vscode.TextDocument): RouteInfo[] {
         const composedPath = joinPath(controllerPrefix || '', methodPath);
 
         // coleta params
-        const paramsInfo = { pathParams: new Set<string>(), queryParams: new Set<string>(), hasBody: false };
+        const paramsInfo = { pathParams: new Set<string>(), queryParams: new Set<string>(), hasBody: false, bodyType: undefined as string | undefined };
         for (const m of composedPath.matchAll(/:([A-Za-z0-9_]+)/g)) paramsInfo.pathParams.add(m[1]);
 
         node.parameters.forEach(p => {
@@ -139,6 +147,10 @@ function extractRoutes(document: vscode.TextDocument): RouteInfo[] {
               else paramsInfo.queryParams.add('*');
             } else if (decoName === 'Body') {
               paramsInfo.hasBody = true;
+              // Captura o tipo do parâmetro @Body
+              if (p.type) {
+                paramsInfo.bodyType = getTypeNameFromTypeNode(p.type);
+              }
             }
           });
         });
@@ -146,23 +158,47 @@ function extractRoutes(document: vscode.TextDocument): RouteInfo[] {
         const methodName = node.name && ts.isIdentifier(node.name) ? node.name.text : 'handler';
         const line = document.positionAt(node.getStart()).line;
 
-        routes.push({
+        routesData.push({
           method,
           path: composedPath,
           controllerPrefix,
           line,
-          controllerMethodName: methodName,
-          params: {
-            pathParams: Array.from(paramsInfo.pathParams),
-            queryParams: Array.from(paramsInfo.queryParams),
-            hasBody: paramsInfo.hasBody
-          }
+          controllerMethodName: methodName
+        });
+
+        paramsData.push({
+          pathParams: Array.from(paramsInfo.pathParams),
+          queryParams: Array.from(paramsInfo.queryParams),
+          hasBody: paramsInfo.hasBody,
+          bodyType: paramsInfo.bodyType
         });
       }
     }
     ts.forEachChild(node, visit);
   };
+
   visit(source);
+
+  // Agora processa os exemplos de body de forma assíncrona
+  const routes: RouteInfo[] = [];
+  for (let i = 0; i < routesData.length; i++) {
+    const routeData = routesData[i];
+    const params = paramsData[i];
+
+    let bodyExample: string | undefined;
+    if (params.hasBody && params.bodyType) {
+      bodyExample = await generateBodyExample(params.bodyType, document);
+    }
+
+    routes.push({
+      ...routeData,
+      params: {
+        ...params,
+        bodyExample
+      }
+    });
+  }
+
   return routes;
 }
 
@@ -193,6 +229,421 @@ function readFirstStringArg(args: readonly ts.Expression[]): string | undefined 
   if (!args || !args.length) return undefined;
   const a = args[0];
   if (ts.isStringLiteralLike(a)) return a.text;
+  return undefined;
+}
+
+function getTypeNameFromTypeNode(typeNode: ts.TypeNode): string | undefined {
+  if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+    return typeNode.typeName.text;
+  }
+  if (ts.isIdentifier(typeNode)) {
+    return typeNode.text;
+  }
+  return undefined;
+}
+
+async function generateBodyExample(bodyType: string, document: vscode.TextDocument): Promise<string | undefined> {
+  if (!bodyType) {
+    console.log(`[NestCaller] bodyType vazio`);
+    return undefined;
+  }
+
+  console.log(`[NestCaller] Gerando exemplo para tipo: ${bodyType}`);
+
+  try {
+    // Busca por definições do tipo no arquivo atual ou no workspace
+    const source = ts.createSourceFile(
+      document.fileName,
+      document.getText(),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    );
+
+    console.log(`[NestCaller] Arquivo analisado: ${document.fileName}`);
+
+    // Primeira tentativa: no arquivo atual
+    const typeDefinition = findTypeDefinition(source, bodyType);
+    if (typeDefinition) {
+      const example = generateJSONFromInterface(typeDefinition);
+      console.log(`[NestCaller] Gerado exemplo para ${bodyType}:`, example);
+      return example;
+    }
+
+    console.log(`[NestCaller] Tipo ${bodyType} não encontrado no arquivo atual`);
+
+    // Segunda tentativa: seguir imports do arquivo atual
+    const importExample = await searchTypeInImports(source, bodyType, document);
+    if (importExample) {
+      console.log(`[NestCaller] Tipo ${bodyType} encontrado via imports:`, importExample);
+      return importExample;
+    }
+
+    console.log(`[NestCaller] Tipo ${bodyType} não encontrado nos imports, buscando no workspace...`);
+
+    // Terceira tentativa: busca no workspace
+    const workspaceExample = await searchTypeInWorkspace(bodyType);
+    if (workspaceExample) {
+      console.log(`[NestCaller] Encontrado ${bodyType} no workspace:`, workspaceExample);
+      return workspaceExample;
+    }
+
+    console.log(`[NestCaller] Tipo ${bodyType} não encontrado no workspace, usando exemplo genérico`);
+    // Se não encontrou, retorna um exemplo genérico baseado no nome
+    const genericExample = generateGenericExample(bodyType);
+    console.log(`[NestCaller] Exemplo genérico para ${bodyType}:`, genericExample);
+    return genericExample;
+  } catch (error) {
+    console.log(`[NestCaller] Erro ao gerar exemplo para ${bodyType}:`, error);
+    // Se der erro, tenta pelo menos o exemplo genérico
+    try {
+      return generateGenericExample(bodyType);
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+async function searchTypeInImports(source: ts.SourceFile, typeName: string, document: vscode.TextDocument): Promise<string | undefined> {
+  console.log(`[NestCaller] Analisando imports para encontrar ${typeName}`);
+
+  // Busca por import statements que podem conter o tipo
+  const imports: { modulePath: string; importedNames: string[] }[] = [];
+
+  const visit = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      const modulePath = node.moduleSpecifier.text;
+      const importedNames: string[] = [];
+
+      if (node.importClause) {
+        if (node.importClause.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
+          for (const element of node.importClause.namedBindings.elements) {
+            importedNames.push(element.name.text);
+          }
+        }
+
+        // Default import
+        if (node.importClause.name) {
+          importedNames.push(node.importClause.name.text);
+        }
+      }
+
+      if (importedNames.includes(typeName)) {
+        imports.push({ modulePath, importedNames });
+        console.log(`[NestCaller] Tipo ${typeName} encontrado no import de: ${modulePath}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(source);
+
+  // Para cada import que contém o tipo, tenta resolver o arquivo
+  for (const imp of imports) {
+    try {
+      const resolvedPath = resolveImportPath(imp.modulePath, document.fileName);
+      if (resolvedPath) {
+        console.log(`[NestCaller] Tentando ler arquivo resolvido: ${resolvedPath}`);
+
+        const uri = vscode.Uri.file(resolvedPath);
+        const content = await vscode.workspace.fs.readFile(uri);
+        const text = Buffer.from(content).toString('utf8');
+
+        const importedSource = ts.createSourceFile(resolvedPath, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const typeDefinition = findTypeDefinition(importedSource, typeName);
+
+        if (typeDefinition) {
+          console.log(`[NestCaller] Tipo ${typeName} encontrado e processado de ${resolvedPath}`);
+          return generateJSONFromInterface(typeDefinition);
+        }
+      }
+    } catch (error) {
+      console.log(`[NestCaller] Erro ao processar import ${imp.modulePath}:`, error);
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveImportPath(importPath: string, currentFilePath: string): string | undefined {
+  try {
+    const path = require('path');
+    const fs = require('fs');
+
+    // Se é um import relativo
+    if (importPath.startsWith('./') || importPath.startsWith('../')) {
+      const currentDir = path.dirname(currentFilePath);
+      let resolvedPath = path.resolve(currentDir, importPath);
+
+      // Tenta diferentes extensões
+      const extensions = ['.ts', '.tsx', '.js', '.jsx'];
+
+      for (const ext of extensions) {
+        const fullPath = resolvedPath + ext;
+        if (fs.existsSync(fullPath)) {
+          return fullPath;
+        }
+      }
+
+      // Tenta como diretório com index
+      for (const ext of extensions) {
+        const indexPath = path.join(resolvedPath, 'index' + ext);
+        if (fs.existsSync(indexPath)) {
+          return indexPath;
+        }
+      }
+    }
+
+    // Para imports absolutos ou de node_modules, não tentamos resolver por agora
+    return undefined;
+  } catch (error) {
+    console.log(`[NestCaller] Erro ao resolver caminho do import ${importPath}:`, error);
+    return undefined;
+  }
+}
+
+function generateGenericExample(typeName: string): string {
+  // Gera exemplos genéricos baseados em padrões comuns de nomes
+  const lowerName = typeName.toLowerCase();
+
+  if (lowerName.includes('user')) {
+    return JSON.stringify({
+      name: "João Silva",
+      email: "joao@example.com",
+      age: 30
+    }, null, 2);
+  }
+
+  if (lowerName.includes('product')) {
+    return JSON.stringify({
+      name: "Produto Exemplo",
+      price: 99.99,
+      description: "Descrição do produto"
+    }, null, 2);
+  }
+
+  if (lowerName.includes('create') || lowerName.includes('post')) {
+    return JSON.stringify({
+      name: "string",
+      description: "string"
+    }, null, 2);
+  }
+
+  if (lowerName.includes('update') || lowerName.includes('put') || lowerName.includes('patch')) {
+    return JSON.stringify({
+      name: "string"
+    }, null, 2);
+  }
+
+  // Exemplo genérico
+  return JSON.stringify({
+    field1: "string",
+    field2: 0,
+    field3: false
+  }, null, 2);
+}
+
+function findTypeDefinition(source: ts.SourceFile, typeName: string): ts.InterfaceDeclaration | ts.ClassDeclaration | undefined {
+  let found: ts.InterfaceDeclaration | ts.ClassDeclaration | undefined;
+
+  const visit = (node: ts.Node) => {
+    // Busca por interfaces
+    if (ts.isInterfaceDeclaration(node)) {
+      if (node.name && ts.isIdentifier(node.name) && node.name.text === typeName) {
+        console.log(`[NestCaller] Interface ${typeName} encontrada`);
+        found = node;
+        return;
+      }
+    }
+
+    // Busca por classes
+    if (ts.isClassDeclaration(node)) {
+      if (node.name && ts.isIdentifier(node.name) && node.name.text === typeName) {
+        console.log(`[NestCaller] Classe ${typeName} encontrada`);
+        found = node;
+        return;
+      }
+    }
+
+    // Busca por tipos exportados
+    if (ts.isModuleDeclaration(node)) {
+      ts.forEachChild(node, visit);
+      return;
+    }
+
+    // Busca dentro de export statements
+    if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+      // Não é o que precisamos aqui, mas pode ser útil em casos específicos
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(source);
+
+  if (!found) {
+    console.log(`[NestCaller] Tipo ${typeName} não encontrado na árvore AST`);
+  }
+
+  return found;
+}
+
+function generateJSONFromInterface(node: ts.InterfaceDeclaration | ts.ClassDeclaration): string {
+  const properties: Record<string, any> = {};
+
+  const members = ts.isInterfaceDeclaration(node) ? node.members :
+    ts.isClassDeclaration(node) ? node.members.filter(ts.isPropertyDeclaration) : [];
+
+  console.log(`[NestCaller] Processando ${members.length} membros do tipo`);
+
+  for (const member of members) {
+    if (ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) {
+      const name = member.name && ts.isIdentifier(member.name) ? member.name.text : 'unknown';
+      const type = member.type;
+
+      console.log(`[NestCaller] Processando propriedade: ${name}`);
+
+      if (type) {
+        properties[name] = getExampleValueForType(type);
+        console.log(`[NestCaller] Tipo processado para ${name}:`, properties[name]);
+      } else {
+        // Se não tem tipo explícito, tenta inferir pelo nome
+        properties[name] = inferValueByPropertyName(name);
+        console.log(`[NestCaller] Valor inferido para ${name}:`, properties[name]);
+      }
+    }
+  }
+
+  const result = JSON.stringify(properties, null, 2);
+  console.log(`[NestCaller] JSON final gerado:`, result);
+  return result;
+}
+
+function inferValueByPropertyName(propName: string): any {
+  const lowerName = propName.toLowerCase();
+
+  // Inferência baseada no nome da propriedade
+  if (lowerName.includes('email')) return "user@example.com";
+  if (lowerName.includes('name')) return "Example Name";
+  if (lowerName.includes('id')) return "12345";
+  if (lowerName.includes('age')) return 25;
+  if (lowerName.includes('date') || lowerName.includes('time')) return new Date().toISOString();
+  if (lowerName.includes('active') || lowerName.includes('enabled')) return true;
+  if (lowerName.includes('count') || lowerName.includes('number')) return 0;
+  if (lowerName.includes('list') || lowerName.includes('array') || lowerName.includes('tags')) return [];
+  if (lowerName.includes('address') || lowerName.includes('info') || lowerName.includes('data')) return {};
+
+  return "example_value";
+}
+
+function getExampleValueForType(typeNode: ts.TypeNode): any {
+  // Verifica se é um tipo primitivo pelo kind
+  switch (typeNode.kind) {
+    case ts.SyntaxKind.StringKeyword:
+      return "example_string";
+    case ts.SyntaxKind.NumberKeyword:
+      return 42;
+    case ts.SyntaxKind.BooleanKeyword:
+      return true;
+    case ts.SyntaxKind.AnyKeyword:
+      return null;
+    case ts.SyntaxKind.VoidKeyword:
+      return null;
+    case ts.SyntaxKind.UndefinedKeyword:
+      return undefined;
+    case ts.SyntaxKind.NullKeyword:
+      return null;
+  }
+
+  if (ts.isArrayTypeNode(typeNode)) {
+    return [getExampleValueForType(typeNode.elementType)];
+  }
+
+  if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+    const typeName = typeNode.typeName.text;
+    // Tipos comuns
+    if (typeName === 'Date') return new Date().toISOString();
+    if (typeName === 'String') return "example_string";
+    if (typeName === 'Number') return 42;
+    if (typeName === 'Boolean') return true;
+
+    // Para outros tipos personalizados, retorna um objeto com placeholder
+    return { [typeName.toLowerCase()]: "nested_object" };
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    // Para union types, pega o primeiro tipo
+    return getExampleValueForType(typeNode.types[0]);
+  }
+
+  if (ts.isTypeLiteralNode(typeNode)) {
+    // Para tipos literais de objeto, processa as propriedades
+    const obj: Record<string, any> = {};
+    for (const member of typeNode.members) {
+      if (ts.isPropertySignature(member) && member.name && ts.isIdentifier(member.name)) {
+        const propName = member.name.text;
+        const propType = member.type;
+        if (propType) {
+          obj[propName] = getExampleValueForType(propType);
+        } else {
+          obj[propName] = "unknown_type";
+        }
+      }
+    }
+    return obj;
+  }
+
+  return "unknown_type";
+}
+
+async function searchTypeInWorkspace(typeName: string): Promise<string | undefined> {
+  try {
+    console.log(`[NestCaller] Buscando ${typeName} no workspace...`);
+
+    // Busca por arquivos TypeScript (mais ampla)
+    const files = await vscode.workspace.findFiles('**/*.ts', '**/node_modules/**', 50);
+    console.log(`[NestCaller] Encontrados ${files.length} arquivos .ts no workspace`);
+
+    for (const file of files) {
+      try {
+        const content = await vscode.workspace.fs.readFile(file);
+        const text = Buffer.from(content).toString('utf8');
+
+        // Busca mais precisa usando regex
+        const classRegex = new RegExp(`\\bclass\\s+${typeName}\\b`, 'g');
+        const interfaceRegex = new RegExp(`\\binterface\\s+${typeName}\\b`, 'g');
+        const typeRegex = new RegExp(`\\btype\\s+${typeName}\\b`, 'g');
+        const exportClassRegex = new RegExp(`\\bexport\\s+class\\s+${typeName}\\b`, 'g');
+        const exportInterfaceRegex = new RegExp(`\\bexport\\s+interface\\s+${typeName}\\b`, 'g');
+
+        if (classRegex.test(text) || interfaceRegex.test(text) || typeRegex.test(text) ||
+          exportClassRegex.test(text) || exportInterfaceRegex.test(text)) {
+
+          console.log(`[NestCaller] Tipo ${typeName} encontrado em: ${file.fsPath}`);
+
+          const source = ts.createSourceFile(file.fsPath, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+          const typeDefinition = findTypeDefinition(source, typeName);
+
+          if (typeDefinition) {
+            const result = generateJSONFromInterface(typeDefinition);
+            console.log(`[NestCaller] Definição processada para ${typeName}:`, result);
+            return result;
+          } else {
+            console.log(`[NestCaller] Regex encontrou ${typeName} em ${file.fsPath}, mas AST não conseguiu processar`);
+          }
+        }
+      } catch (error) {
+        console.log(`[NestCaller] Erro ao processar arquivo ${file.fsPath}:`, error);
+        continue;
+      }
+    }
+
+    console.log(`[NestCaller] Tipo ${typeName} não encontrado em nenhum arquivo do workspace`);
+  } catch (error) {
+    console.log(`[NestCaller] Erro na busca no workspace:`, error);
+  }
+
   return undefined;
 }
 
@@ -284,7 +735,8 @@ async function openFormWebview(route: RouteInfo, context: vscode.ExtensionContex
       const payload: PresetPayload = msg.payload;
 
       const prefixToUse = payload.applyGlobal && payload.globalPrefix ? payload.globalPrefix : '';
-      const fullPath = joinPath(prefixToUse, payload.path);
+      const pathWithParams = replacePathParams(payload.path, payload.pathParams);
+      const fullPath = joinPath(prefixToUse, pathWithParams);
       const qs = buildQueryString(payload.query || {});
       const url = joinUrl(payload.baseUrl, fullPath) + (qs ? `?${qs}` : '');
 
@@ -366,6 +818,33 @@ ${bodyText}
       const data = bucket.named?.[name];
       if (data) panel.webview.postMessage({ type: 'presetData', payload: data });
     }
+
+    if (msg.type === 'regenerateBody') {
+      if (route.params.bodyType) {
+        try {
+          const currentDocument = vscode.window.activeTextEditor?.document;
+          if (currentDocument) {
+            const newExample = await generateBodyExample(route.params.bodyType, currentDocument);
+            if (newExample) {
+              panel.webview.postMessage({
+                type: 'updateBody',
+                payload: { bodyText: newExample }
+              });
+            } else {
+              panel.webview.postMessage({
+                type: 'showToast',
+                payload: { message: 'Não foi possível regenerar o exemplo' }
+              });
+            }
+          }
+        } catch (error) {
+          panel.webview.postMessage({
+            type: 'showToast',
+            payload: { message: 'Erro ao regenerar exemplo' }
+          });
+        }
+      }
+    }
   });
 }
 
@@ -411,6 +890,15 @@ function normalizeHeaders(items: string[]) {
 }
 function sanitize(p: string) { return p.replace(/[^\w\-]+/g, '_'); }
 
+function replacePathParams(path: string, pathParams: Record<string, string>): string {
+  let result = path;
+  Object.entries(pathParams || {}).forEach(([key, value]) => {
+    // Substitui :param pelo valor
+    result = result.replace(new RegExp(`:${key}\\b`, 'g'), value || `:${key}`);
+  });
+  return result;
+}
+
 /** -------------------- HTML da Webview (bonito + chips + copiar cURL) -------------------- */
 function getWebviewHtmlWithGlobal(
   route: RouteInfo,
@@ -431,7 +919,7 @@ function getWebviewHtmlWithGlobal(
     headers: defaultHeaders,
     bearerToken: '',
     includeBearer: false,
-    bodyText: '',
+    bodyText: route.params.bodyExample || '',
     applyGlobal: gp.applyGlobalByDefault,
     globalPrefix: gp.globalPrefix
   });
@@ -663,7 +1151,13 @@ function getWebviewHtmlWithGlobal(
 
       <!-- Direita -->
       <div class="card" ${route.params.hasBody ? '' : 'style="display:none"'}>
-        <div class="section-title" style="margin-bottom:8px;">Body (JSON)</div>
+        <div class="section-title" style="margin-bottom:8px; display: flex; align-items: center; justify-content: space-between;">
+          <span>Body (JSON)</span>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            ${route.params.bodyType ? `<span class="hint" style="color:var(--muted); font-size: 11px; font-weight: normal;">baseado em ${route.params.bodyType}</span>` : ''}
+            ${route.params.bodyType ? `<button id="regenerateBody" class="btn small" title="Regenerar exemplo baseado no DTO">🔄</button>` : ''}
+          </div>
+        </div>
         <textarea id="bodyText" placeholder='{"exemplo": true}'></textarea>
         <div class="hint" style="color:var(--muted);">Enviado apenas para métodos com corpo (não GET/HEAD).</div>
       </div>
@@ -694,6 +1188,7 @@ function getWebviewHtmlWithGlobal(
   };
 
   // Prévia do caminho/base
+  let updatePreview; // Variável para expor a função update
   (function wirePreview(){
     const preview = el('fullPathPreview');
     function ensureLeadingSlash(p){ if(!p) return '/'; return p.startsWith('/') ? p : '/' + p; }
@@ -704,14 +1199,34 @@ function getWebviewHtmlWithGlobal(
       const right = b.startsWith('/') ? b : '/' + b;
       return left + right;
     }
+    function replacePathParams(path, pathParams) {
+      let result = path;
+      Object.entries(pathParams || {}).forEach(([key, value]) => {
+        // Substitui :param pelo valor
+        result = result.replace(new RegExp(':' + key + '\\\\b', 'g'), value || ':' + key);
+      });
+      return result;
+    }
     function update(){
       const base = el('baseUrl')?.value || '';
       const gp = el('globalPrefix')?.value || '';
       const use = el('applyGlobal')?.checked;
       const p = el('path')?.value || '';
-      const full = (base || '') + joinPath(use && gp ? gp : '', p || '/');
+      
+      // Coleta path params atuais
+      const pps = {};
+      document.querySelectorAll('[data-pp]').forEach(i => {
+        const key = i.getAttribute('data-pp');
+        pps[key] = i.value || ':' + key;
+      });
+      
+      // Substitui path params no path
+      const pathWithParams = replacePathParams(p, pps);
+      
+      const full = (base || '') + joinPath(use && gp ? gp : '', pathWithParams || '/');
       preview.textContent = full;
     }
+    updatePreview = update; // Expõe a função para uso externo
     ['baseUrl','globalPrefix','applyGlobal','path'].forEach(id => {
       const i = el(id);
       if (!i) return;
@@ -730,6 +1245,12 @@ function getWebviewHtmlWithGlobal(
     el('applyGlobal').checked = (last && typeof last.applyGlobal !== 'undefined') ? !!last.applyGlobal : !!initial.applyGlobal;
     el('globalPrefix').value = (last && last.globalPrefix) || initial.globalPrefix || '';
 
+    // body text
+    const bodyTextEl = el('bodyText');
+    if (bodyTextEl) {
+      bodyTextEl.value = (last && last.bodyText) || initial.bodyText || '';
+    }
+
     // presets
     const sel = el('presetSelect');
     sel.innerHTML = '<option value="">-- selecione --</option>' + presetNames.map(n => '<option>'+n+'</option>').join('');
@@ -741,7 +1262,10 @@ function getWebviewHtmlWithGlobal(
       const row = document.createElement('div'); row.className = 'row';
       row.innerHTML = '<label>:'+k+'</label><input data-pp="'+k+'" placeholder="'+k+'" />';
       ppArea.appendChild(row);
-      row.querySelector('input').value = val;
+      const input = row.querySelector('input');
+      input.value = val;
+      // Adiciona listener para atualizar preview quando path param muda
+      input.addEventListener('input', updatePreview);
     });
 
     // query params (chips)
@@ -777,6 +1301,15 @@ function getWebviewHtmlWithGlobal(
   build();
 
   el('addQuery').onclick = () => addQueryChip('', '');
+
+  // Regenerar body baseado no DTO
+  const regenerateBtn = el('regenerateBody');
+  if (regenerateBtn) {
+    regenerateBtn.onclick = () => {
+      vscode.postMessage({ type: 'regenerateBody' });
+      toast('Regenerando exemplo do body...');
+    };
+  }
 
   function collect(){
     const pps = {};
@@ -842,7 +1375,8 @@ function getWebviewHtmlWithGlobal(
 
   function buildCurlPreview(payload) {
     const prefix = (payload.applyGlobal && payload.globalPrefix) ? payload.globalPrefix : '';
-    const path = joinPath(prefix, payload.path);
+    const pathWithParams = replacePathParams(payload.path, payload.pathParams);
+    const path = joinPath(prefix, pathWithParams);
     const qs = buildQueryString(payload.query || {});
     const url = joinUrl(payload.baseUrl, path) + (qs ? '?' + qs : '');
     const headers = (payload.headers || []).slice();
@@ -855,7 +1389,7 @@ function getWebviewHtmlWithGlobal(
     if (hasBody) curl += " -d '" + payload.bodyText.replace(/'/g, "'\\\\''") + "'";
     return curl;
   }
-
+  
   el('previewCurl').onclick = () => {
     const val = validateJsonIfPresent();
     if (!val.ok) { alert('Body JSON inválido: ' + val.error); return; }
@@ -922,6 +1456,16 @@ function getWebviewHtmlWithGlobal(
     if (msg.type === 'presetData') {
       applyPreset(msg.payload);
     }
+    if (msg.type === 'updateBody') {
+      const bodyTextarea = el('bodyText');
+      if (bodyTextarea) {
+        bodyTextarea.value = msg.payload.bodyText;
+        toast('Body regenerado com sucesso!');
+      }
+    }
+    if (msg.type === 'showToast') {
+      toast(msg.payload.message);
+    }
   });
 
   function applyPreset(p){
@@ -932,6 +1476,12 @@ function getWebviewHtmlWithGlobal(
     el('bearerOn').checked = !!p.includeBearer;
     el('applyGlobal').checked = !!p.applyGlobal;
     el('globalPrefix').value = p.globalPrefix || (initial.globalPrefix || '');
+
+    // body text
+    const bodyTextEl = el('bodyText');
+    if (bodyTextEl) {
+      bodyTextEl.value = p.bodyText || '';
+    }
 
     document.getElementById('ppArea').querySelectorAll('[data-pp]').forEach((i) => {
       const key = i.getAttribute('data-pp');

@@ -6,10 +6,13 @@ Chame rotas **NestJS** direto do VS Code: clique no CodeLens acima do método de
   <img src="media/icon.png" width="128" height="128" alt="Nest Caller icon">
 </p>
 
-## ✨ Features
-- CodeLens “Call …” em `@Get/@Post/@Put/@Patch/@Delete/@Head/@Options/@All`
+✨ Features
+- CodeLens "Call …" em `@Get/@Post/@Put/@Patch/@Delete/@Head/@Options/@All`
 - Lê `@Controller('prefix')` e compõe o path final
 - Detecta `app.setGlobalPrefix('v1', { exclude: [...] })` (auto) e permite **toggle** no formulário
+- **🎯 Body Pré-pronto**: Gera JSON automaticamente baseado no tipo do `@Body` (DTOs)
+- **🔍 Busca Inteligente**: Encontra DTOs em arquivos separados via imports e workspace
+- **🔄 Regeneração**: Botão para regenerar exemplo do body a qualquer momento
 - **Query Params como chips removíveis**
 - **Pré-visualizar cURL** e **Copiar cURL** para o clipboard
 - **Headers padrão** (config) + Bearer Token opcional
