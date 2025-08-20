@@ -1027,7 +1027,7 @@ function getWebviewHtmlWithGlobal(
   .container { padding: 18px; max-width: 1400px; margin: 0 auto; }
 
   /* header */
-  .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 16px; }
+  .header { display:flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
   .title { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .badge { font:11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; border:1px solid var(--border); padding:4px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:.6px; background:var(--panel); }
   .path-preview { font:12px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:var(--muted); }
@@ -1140,7 +1140,7 @@ function getWebviewHtmlWithGlobal(
         <span class="badge">${route.method}</span>
         <h2 style="margin:0;">${route.path}</h2>
       </div>
-      <div class="path-preview" id="fullPathPreview" title="Prévia do caminho completo"></div>
+      <div class="path-preview" id="fullPathPreview" title="Prévia do caminho completo" style="font-size: 12px; opacity: 0.8;"></div>
     </div>
 
     <!-- Presets -->
