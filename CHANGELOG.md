@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.2.0] - 2025-08-21
+### Added
+- Carmelia icon
+
 ## [1.1.3] - 2025-08-21
 ### Fixed
 - Body com tipo inline no parâmetro `@Body()` agora é corretamente inferido (ex.: `@Body() body: { input: string }`).
