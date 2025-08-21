@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.3] - 2025-08-21
+### Fixed
+- Body com tipo inline no parâmetro `@Body()` agora é corretamente inferido (ex.: `@Body() body: { input: string }`).
+- Arrays genéricos `Array<T>`/`ReadonlyArray<T>` geram `[ exemploDeT ]` em vez de placeholder.
+- Resolução de tipos importados a partir de caminhos absolutos do workspace (ex.: `src/...`).
+- Suporte a `type` alias (ex.: `export type AgentCompanyInfo = { ... }`), expandindo corretamente para JSON.
+
+### Enhanced
+- Resolução recursiva de tipos referenciados (interfaces, classes e type aliases) com prevenção de ciclos.
+- Exemplo de body mais fiel para objetos aninhados e arrays de objetos.
+- Logs melhorados para auxiliar debug da geração do body.
+
+### Docs
+- README atualizado explicando suporte a tipos inline, arrays genéricos, imports absolutos e type aliases.
+
 ## [1.1.0] - 2025-08-19
 ### Added
 - **🎯 Body Pré-pronto baseado em DTOs**: Geração automática de JSON de exemplo quando métodos possuem `@Body` com tipos específicos

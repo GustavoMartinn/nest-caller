@@ -37,15 +37,18 @@ A extensão detecta automaticamente tipos TypeScript para gerar exemplos de body
 - **Interfaces**: `interface CreateUserDto { name: string; age: number; }`
 - **Classes**: `class UpdateUserDto { email?: string; }`
 - **Tipos Primitivos**: `string`, `number`, `boolean`, `Date`
-- **Arrays**: `string[]`, `UserDto[]`
+- **Arrays**: `string[]`, `UserDto[]`, `Array<T>`, `ReadonlyArray<T>`
 - **Objetos Aninhados**: `{ address: { street: string; city: string; } }`
 - **Union Types**: `'admin' | 'user'`
 - **Propriedades Opcionais**: `email?: string`
+ - **Tipos Inline no @Body**: `@Body() body: { input: string }`
+ - **Type Aliases**: `export type AgentCompanyInfo = { name?: string; ... }`
 
 ### 🔍 Busca Inteligente
 - **Mesmo Arquivo**: DTOs definidos no arquivo do controller
 - **Imports Relativos**: `import { UserDto } from './dto/user.dto'`
-- **Busca no Workspace**: Encontra DTOs em qualquer arquivo do projeto
+- **Imports Absolutos do Workspace**: `import { X } from 'src/...'
+- **Busca no Workspace**: Encontra DTOs em qualquer arquivo do projeto (fallback)
 - **Fallback Inteligente**: Gera exemplos baseados no nome quando DTO não é encontrado
 
 ### 💡 Exemplos Gerados

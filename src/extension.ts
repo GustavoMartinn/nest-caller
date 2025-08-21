@@ -97,6 +97,7 @@ async function extractRoutes(document: vscode.TextDocument): Promise<RouteInfo[]
     queryParams: string[];
     hasBody: boolean;
     bodyType?: string;
+    bodyExample?: string;
   }> = [];
 
   const visit = (node: ts.Node) => {
@@ -132,7 +133,13 @@ async function extractRoutes(document: vscode.TextDocument): Promise<RouteInfo[]
         const composedPath = joinPath(controllerPrefix || '', methodPath);
 
         // coleta params
-        const paramsInfo = { pathParams: new Set<string>(), queryParams: new Set<string>(), hasBody: false, bodyType: undefined as string | undefined };
+        const paramsInfo = {
+          pathParams: new Set<string>(),
+          queryParams: new Set<string>(),
+          hasBody: false,
+          bodyType: undefined as string | undefined,
+          bodyExample: undefined as string | undefined
+        };
         for (const m of composedPath.matchAll(/:([A-Za-z0-9_]+)/g)) paramsInfo.pathParams.add(m[1]);
 
         node.parameters.forEach(p => {
@@ -154,7 +161,21 @@ async function extractRoutes(document: vscode.TextDocument): Promise<RouteInfo[]
               paramsInfo.hasBody = true;
               // Captura o tipo do parâmetro @Body
               if (p.type) {
-                paramsInfo.bodyType = getTypeNameFromTypeNode(p.type);
+                const maybeName = getTypeNameFromTypeNode(p.type);
+                if (maybeName) {
+                  paramsInfo.bodyType = maybeName;
+                } else {
+                  // Tipo inline (ex.: { input: string }) ou outro que não seja identificador
+                  try {
+                    const exampleVal = getExampleValueForTypeSync(p.type);
+                    // Apenas serializa se for objeto/array representável
+                    if (typeof exampleVal === 'object') {
+                      paramsInfo.bodyExample = JSON.stringify(exampleVal, null, 2);
+                    }
+                  } catch {
+                    // ignora
+                  }
+                }
               }
             }
           });
@@ -175,7 +196,8 @@ async function extractRoutes(document: vscode.TextDocument): Promise<RouteInfo[]
           pathParams: Array.from(paramsInfo.pathParams),
           queryParams: Array.from(paramsInfo.queryParams),
           hasBody: paramsInfo.hasBody,
-          bodyType: paramsInfo.bodyType
+          bodyType: paramsInfo.bodyType,
+          bodyExample: paramsInfo.bodyExample
         });
       }
     }
@@ -190,8 +212,8 @@ async function extractRoutes(document: vscode.TextDocument): Promise<RouteInfo[]
     const routeData = routesData[i];
     const params = paramsData[i];
 
-    let bodyExample: string | undefined;
-    if (params.hasBody && params.bodyType) {
+    let bodyExample: string | undefined = params.bodyExample;
+    if (!bodyExample && params.hasBody && params.bodyType) {
       bodyExample = await generateBodyExample(params.bodyType, document);
     }
 
@@ -270,7 +292,7 @@ async function generateBodyExample(bodyType: string, document: vscode.TextDocume
     // Primeira tentativa: no arquivo atual
     const typeDefinition = findTypeDefinition(source, bodyType);
     if (typeDefinition) {
-      const example = generateJSONFromInterface(typeDefinition);
+      const example = await generateJSONFromDeclaration(typeDefinition, { source, filePath: document.fileName });
       console.log(`[NestCaller] Gerado exemplo para ${bodyType}:`, example);
       return example;
     }
@@ -359,7 +381,7 @@ async function searchTypeInImports(source: ts.SourceFile, typeName: string, docu
 
         if (typeDefinition) {
           console.log(`[NestCaller] Tipo ${typeName} encontrado e processado de ${resolvedPath}`);
-          return generateJSONFromInterface(typeDefinition);
+          return await generateJSONFromDeclaration(typeDefinition, { source: importedSource, filePath: resolvedPath });
         }
       }
     } catch (error) {
@@ -400,7 +422,30 @@ function resolveImportPath(importPath: string, currentFilePath: string): string 
       }
     }
 
-    // Para imports absolutos ou de node_modules, não tentamos resolver por agora
+    // Tentativa: resolver a partir da raiz do workspace (ex.: 'src/...')
+    try {
+      const wsFolders = vscode.workspace.workspaceFolders || [];
+      if (wsFolders.length) {
+        const root = wsFolders[0].uri.fsPath;
+        const path = require('path');
+        const fs = require('fs');
+        const bases = [importPath, './' + importPath, '/' + importPath];
+        const extensions = ['.ts', '.tsx', '.js', '.jsx'];
+        for (const base of bases) {
+          const abs = path.resolve(root, base);
+          for (const ext of extensions) {
+            const fullPath = abs + ext;
+            if (fs.existsSync(fullPath)) return fullPath;
+          }
+          for (const ext of extensions) {
+            const indexPath = path.join(abs, 'index' + ext);
+            if (fs.existsSync(indexPath)) return indexPath;
+          }
+        }
+      }
+    } catch { }
+
+    // Para imports de node_modules ou irresolvíveis, retorna undefined
     return undefined;
   } catch (error) {
     console.log(`[NestCaller] Erro ao resolver caminho do import ${importPath}:`, error);
@@ -449,8 +494,8 @@ function generateGenericExample(typeName: string): string {
   }, null, 2);
 }
 
-function findTypeDefinition(source: ts.SourceFile, typeName: string): ts.InterfaceDeclaration | ts.ClassDeclaration | undefined {
-  let found: ts.InterfaceDeclaration | ts.ClassDeclaration | undefined;
+function findTypeDefinition(source: ts.SourceFile, typeName: string): ts.InterfaceDeclaration | ts.ClassDeclaration | ts.TypeAliasDeclaration | undefined {
+  let found: ts.InterfaceDeclaration | ts.ClassDeclaration | ts.TypeAliasDeclaration | undefined;
 
   const visit = (node: ts.Node) => {
     // Busca por interfaces
@@ -466,6 +511,15 @@ function findTypeDefinition(source: ts.SourceFile, typeName: string): ts.Interfa
     if (ts.isClassDeclaration(node)) {
       if (node.name && ts.isIdentifier(node.name) && node.name.text === typeName) {
         console.log(`[NestCaller] Classe ${typeName} encontrada`);
+        found = node;
+        return;
+      }
+    }
+
+    // Type Alias
+    if (ts.isTypeAliasDeclaration(node)) {
+      if (node.name && ts.isIdentifier(node.name) && node.name.text === typeName) {
+        console.log(`[NestCaller] Type alias ${typeName} encontrado`);
         found = node;
         return;
       }
@@ -494,35 +548,39 @@ function findTypeDefinition(source: ts.SourceFile, typeName: string): ts.Interfa
   return found;
 }
 
-function generateJSONFromInterface(node: ts.InterfaceDeclaration | ts.ClassDeclaration): string {
-  const properties: Record<string, any> = {};
+type TypeGenContext = { source: ts.SourceFile; filePath: string; visited?: Set<string> };
 
+type SupportedDecl = ts.InterfaceDeclaration | ts.ClassDeclaration | ts.TypeAliasDeclaration;
+
+async function generateJSONFromDeclaration(node: SupportedDecl, ctx: TypeGenContext): Promise<string> {
+  let obj: any = {};
+  if (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) {
+    obj = await buildObjectFromMembers(node, ctx);
+  } else if (ts.isTypeAliasDeclaration(node)) {
+    obj = await buildFromTypeNode(node.type, ctx);
+  }
+  const result = JSON.stringify(obj, null, 2);
+  console.log(`[NestCaller] JSON final gerado:`, result);
+  return result;
+}
+
+async function buildObjectFromMembers(node: ts.InterfaceDeclaration | ts.ClassDeclaration, ctx: TypeGenContext): Promise<Record<string, any>> {
+  const properties: Record<string, any> = {};
   const members = ts.isInterfaceDeclaration(node) ? node.members :
     ts.isClassDeclaration(node) ? node.members.filter(ts.isPropertyDeclaration) : [];
-
-  console.log(`[NestCaller] Processando ${members.length} membros do tipo`);
 
   for (const member of members) {
     if (ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) {
       const name = member.name && ts.isIdentifier(member.name) ? member.name.text : 'unknown';
       const type = member.type;
-
-      console.log(`[NestCaller] Processando propriedade: ${name}`);
-
       if (type) {
-        properties[name] = getExampleValueForType(type);
-        console.log(`[NestCaller] Tipo processado para ${name}:`, properties[name]);
+        properties[name] = await getExampleValueForTypeAsync(type, ctx);
       } else {
-        // Se não tem tipo explícito, tenta inferir pelo nome
         properties[name] = inferValueByPropertyName(name);
-        console.log(`[NestCaller] Valor inferido para ${name}:`, properties[name]);
       }
     }
   }
-
-  const result = JSON.stringify(properties, null, 2);
-  console.log(`[NestCaller] JSON final gerado:`, result);
-  return result;
+  return properties;
 }
 
 function inferValueByPropertyName(propName: string): any {
@@ -542,7 +600,7 @@ function inferValueByPropertyName(propName: string): any {
   return "example_value";
 }
 
-function getExampleValueForType(typeNode: ts.TypeNode): any {
+async function getExampleValueForTypeAsync(typeNode: ts.TypeNode, ctx: TypeGenContext): Promise<any> {
   // Verifica se é um tipo primitivo pelo kind
   switch (typeNode.kind) {
     case ts.SyntaxKind.StringKeyword:
@@ -562,7 +620,7 @@ function getExampleValueForType(typeNode: ts.TypeNode): any {
   }
 
   if (ts.isArrayTypeNode(typeNode)) {
-    return [getExampleValueForType(typeNode.elementType)];
+    return [await getExampleValueForTypeAsync(typeNode.elementType, ctx)];
   }
 
   if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
@@ -573,13 +631,40 @@ function getExampleValueForType(typeNode: ts.TypeNode): any {
     if (typeName === 'Number') return 42;
     if (typeName === 'Boolean') return true;
 
-    // Para outros tipos personalizados, retorna um objeto com placeholder
+    // Array genérico (Array<T>, ReadonlyArray<T>)
+    if ((typeName === 'Array' || typeName === 'ReadonlyArray') && typeNode.typeArguments?.length) {
+      const el = typeNode.typeArguments[0];
+      return [await getExampleValueForTypeAsync(el, ctx)];
+    }
+
+    // Tenta resolver tipo personalizado dentro do contexto
+    const visited = ctx.visited || (ctx.visited = new Set());
+    if (visited.has(typeName)) {
+      // previne recursão infinita
+      return { [typeName.toLowerCase()]: "circular_ref" };
+    }
+    visited.add(typeName);
+    try {
+      const resolved = await resolveReferencedType(typeName, ctx);
+      if (resolved) {
+        let val: any;
+        if (ts.isInterfaceDeclaration(resolved) || ts.isClassDeclaration(resolved)) {
+          val = await buildObjectFromMembers(resolved, ctx);
+        } else if (ts.isTypeAliasDeclaration(resolved)) {
+          val = await buildFromTypeNode(resolved.type, ctx);
+        }
+        visited.delete(typeName);
+        if (val !== undefined) return val;
+      }
+    } catch { }
+    visited.delete(typeName);
+    // fallback: placeholder
     return { [typeName.toLowerCase()]: "nested_object" };
   }
 
   if (ts.isUnionTypeNode(typeNode)) {
     // Para union types, pega o primeiro tipo
-    return getExampleValueForType(typeNode.types[0]);
+    return getExampleValueForTypeAsync(typeNode.types[0], ctx);
   }
 
   if (ts.isTypeLiteralNode(typeNode)) {
@@ -590,7 +675,7 @@ function getExampleValueForType(typeNode: ts.TypeNode): any {
         const propName = member.name.text;
         const propType = member.type;
         if (propType) {
-          obj[propName] = getExampleValueForType(propType);
+          obj[propName] = await getExampleValueForTypeAsync(propType, ctx);
         } else {
           obj[propName] = "unknown_type";
         }
@@ -600,6 +685,119 @@ function getExampleValueForType(typeNode: ts.TypeNode): any {
   }
 
   return "unknown_type";
+}
+
+function getExampleValueForTypeSync(typeNode: ts.TypeNode): any {
+  switch (typeNode.kind) {
+    case ts.SyntaxKind.StringKeyword:
+      return "example_string";
+    case ts.SyntaxKind.NumberKeyword:
+      return 42;
+    case ts.SyntaxKind.BooleanKeyword:
+      return true;
+    case ts.SyntaxKind.AnyKeyword:
+      return null;
+    case ts.SyntaxKind.VoidKeyword:
+      return null;
+    case ts.SyntaxKind.UndefinedKeyword:
+      return undefined;
+    case ts.SyntaxKind.NullKeyword:
+      return null;
+  }
+
+  if (ts.isArrayTypeNode(typeNode)) {
+    return [getExampleValueForTypeSync(typeNode.elementType)];
+  }
+
+  if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+    const typeName = typeNode.typeName.text;
+    if (typeName === 'Date') return new Date().toISOString();
+    if (typeName === 'String') return "example_string";
+    if (typeName === 'Number') return 42;
+    if (typeName === 'Boolean') return true;
+    if ((typeName === 'Array' || typeName === 'ReadonlyArray') && typeNode.typeArguments?.length) {
+      return [getExampleValueForTypeSync(typeNode.typeArguments[0])];
+    }
+    return { [typeName.toLowerCase()]: "nested_object" };
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    return getExampleValueForTypeSync(typeNode.types[0]);
+  }
+
+  if (ts.isTypeLiteralNode(typeNode)) {
+    const obj: Record<string, any> = {};
+    for (const member of typeNode.members) {
+      if (ts.isPropertySignature(member) && member.name && ts.isIdentifier(member.name)) {
+        const propName = member.name.text;
+        const propType = member.type;
+        obj[propName] = propType ? getExampleValueForTypeSync(propType) : "unknown_type";
+      }
+    }
+    return obj;
+  }
+
+  return "unknown_type";
+}
+
+async function resolveReferencedType(typeName: string, ctx: TypeGenContext): Promise<SupportedDecl | undefined> {
+  // 1) No mesmo arquivo
+  const local = findTypeDefinition(ctx.source, typeName);
+  if (local) return local;
+
+  // 2) Seguir imports do arquivo atual
+  const imported = await tryResolveFromImports(ctx.source, ctx.filePath, typeName);
+  if (imported) return imported;
+
+  // 3) Buscar no workspace (fallback)
+  try {
+    const files = await vscode.workspace.findFiles('**/*.ts', '**/node_modules/**', 40);
+    for (const file of files) {
+      const content = await vscode.workspace.fs.readFile(file);
+      const text = Buffer.from(content).toString('utf8');
+      if (!new RegExp(`\\b(class|interface|type)\\s+${typeName}\\b`).test(text)) continue;
+      const sf = ts.createSourceFile(file.fsPath, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const def = findTypeDefinition(sf, typeName);
+      if (def) return def;
+    }
+  } catch { }
+  return undefined;
+}
+
+async function tryResolveFromImports(source: ts.SourceFile, sourcePath: string, typeName: string): Promise<SupportedDecl | undefined> {
+  const imports: { modulePath: string; importedNames: string[] }[] = [];
+  const collect = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const modulePath = node.moduleSpecifier.text;
+      const names: string[] = [];
+      const clause = node.importClause;
+      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+        for (const el of clause.namedBindings.elements) names.push(el.name.text);
+      }
+      if (clause?.name) names.push(clause.name.text);
+      if (names.includes(typeName)) imports.push({ modulePath, importedNames: names });
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(source);
+
+  for (const imp of imports) {
+    const filePath = resolveImportPath(imp.modulePath, sourcePath);
+    if (!filePath) continue;
+    try {
+      const buf = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+      const text = Buffer.from(buf).toString('utf8');
+      const sf = ts.createSourceFile(filePath, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const def = findTypeDefinition(sf, typeName);
+      if (def) return def;
+    } catch { }
+  }
+  return undefined;
+}
+
+async function buildFromTypeNode(typeNode: ts.TypeNode, ctx: TypeGenContext): Promise<any> {
+  // Reusa a mesma lógica de getExampleValueForTypeAsync, pois já trata TypeLiteral/Array/Union/Refs
+  return getExampleValueForTypeAsync(typeNode, ctx);
 }
 
 async function searchTypeInWorkspace(typeName: string): Promise<string | undefined> {
@@ -631,7 +829,7 @@ async function searchTypeInWorkspace(typeName: string): Promise<string | undefin
           const typeDefinition = findTypeDefinition(source, typeName);
 
           if (typeDefinition) {
-            const result = generateJSONFromInterface(typeDefinition);
+            const result = await generateJSONFromDeclaration(typeDefinition, { source, filePath: file.fsPath });
             console.log(`[NestCaller] Definição processada para ${typeName}:`, result);
             return result;
           } else {
